@@ -1,7 +1,7 @@
 name: Publish
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore: ['.github/**']
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: publish-package
+  group: publish-package-${{ github.ref_name }}
   cancel-in-progress: false
 jobs:
   lint:
@@ -62,18 +62,33 @@ jobs:
       - name: Mint publishing token
         id: mint
         env:
-          CLIENT_ID: ${{ secrets.AUX4_PUBLISHER_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.AUX4_PUBLISHER_CLIENT_SECRET }}
+          DEV_CLIENT_ID: ${{ secrets.AUX4_DEV_PUBLISHER_CLIENT_ID }}
+          DEV_CLIENT_SECRET: ${{ secrets.AUX4_DEV_PUBLISHER_CLIENT_SECRET }}
+          PROD_CLIENT_ID: ${{ secrets.AUX4_PUBLISHER_CLIENT_ID }}
+          PROD_CLIENT_SECRET: ${{ secrets.AUX4_PUBLISHER_CLIENT_SECRET }}
+          PUBLISH_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          if [ "$PUBLISH_BRANCH" = "dev" ]; then
+            SSO_URL="https://dev.sso.aux4.io/token"
+            CLIENT_ID="$DEV_CLIENT_ID"
+            CLIENT_SECRET="$DEV_CLIENT_SECRET"
+          elif [ "$PUBLISH_BRANCH" = "main" ]; then
+            SSO_URL="https://sso.aux4.io/token"
+            CLIENT_ID="$PROD_CLIENT_ID"
+            CLIENT_SECRET="$PROD_CLIENT_SECRET"
+          else
+            echo "::error::Publishing is only supported from dev and main"
+            exit 1
+          fi
           if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
-            echo "::error::Production publisher client credentials are not configured"
+            echo "::error::Publisher client credentials are not configured for $PUBLISH_BRANCH"
             exit 1
           fi
           TOKEN=$(curl --fail --silent --show-error \
             --user "$CLIENT_ID:$CLIENT_SECRET" \
             --data grant_type=client_credentials \
-            https://sso.aux4.io/token | jq -er '.access_token')
+            "$SSO_URL" | jq -er '.access_token')
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
       - uses: aux4/action@v1
@@ -81,4 +96,5 @@ jobs:
           command: publish
           level: ${{ inputs.level || 'patch' }}
           aux4_token: ${{ steps.mint.outputs.token }}
+          registry: ${{ github.ref_name == 'dev' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

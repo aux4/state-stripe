@@ -1,0 +1,69 @@
+{
+  "scope": "aux4",
+  "name": "state-stripe",
+  "version": "0.1.0",
+  "description": "Stripe resource schemas and lifecycle adapter for aux4/state",
+  "license": "MIT",
+  "tags": [
+    "state",
+    "stripe",
+    "resources"
+  ],
+  "dependencies": [
+    "aux4/state",
+    "community/stripe"
+  ],
+  "system": [
+    [
+      "test:node --version",
+      "brew:node",
+      "apt:nodejs",
+      "dnf:nodejs",
+      "apk:nodejs"
+    ]
+  ],
+  "profiles": [
+    {
+      "name": "main",
+      "commands": [
+        {
+          "name": "state",
+          "execute": [
+            "profile:state"
+          ],
+          "help": {
+            "text": "Manage declarative resources"
+          }
+        }
+      ]
+    },
+    {
+      "name": "state",
+      "commands": [
+        {
+          "name": "stripe",
+          "execute": [
+            "profile:state:stripe"
+          ],
+          "help": {
+            "text": "Stripe resource adapter"
+          }
+        }
+      ]
+    },
+    {
+      "name": "state:stripe",
+      "commands": [
+        {
+          "name": "resource",
+          "execute": [
+            "stdin:node ${packageDir}/lib/state-stripe.mjs"
+          ],
+          "help": {
+            "text": "Handle Stripe resource schema and lifecycle requests"
+          }
+        }
+      ]
+    }
+  ]
+}

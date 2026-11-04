@@ -1,0 +1,4 @@
+node_modules/
+package/lib/*.mjs
+.DS_Store
+.aux4-state/

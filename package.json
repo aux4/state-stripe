@@ -1,0 +1,17 @@
+{
+  "name": "@aux4/state-stripe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "rollup": "^4.67.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -2,6 +2,7 @@ name: Publish
 on:
   push:
     branches: [main]
+    paths-ignore: ['.github/**']
   workflow_dispatch:
     inputs:
       level:
@@ -58,9 +59,26 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run build
+      - name: Mint publishing token
+        id: mint
+        env:
+          CLIENT_ID: ${{ secrets.AUX4_PUBLISHER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AUX4_PUBLISHER_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+            echo "::error::Production publisher client credentials are not configured"
+            exit 1
+          fi
+          TOKEN=$(curl --fail --silent --show-error \
+            --user "$CLIENT_ID:$CLIENT_SECRET" \
+            --data grant_type=client_credentials \
+            https://sso.aux4.io/token | jq -er '.access_token')
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
       - uses: aux4/action@v1
         with:
           command: publish
           level: ${{ inputs.level || 'patch' }}
-          aux4_token: ${{ secrets.AUX4_ACCESS_TOKEN }}
+          aux4_token: ${{ steps.mint.outputs.token }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

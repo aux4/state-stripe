@@ -1,6 +1,6 @@
 # aux4/state-stripe
 
-Resource schemas, defaults, change detection rules and lifecycle operations for Stripe products and prices. All API communication is delegated to community/stripe.
+Resource schemas, defaults, change detection rules and lifecycle operations for Stripe products, fixed and metered prices, and Billing Meters. All API communication is delegated to community/stripe.
 
 ## Installation
 
@@ -44,6 +44,28 @@ resources:
       recurring:
         interval: month
       lookup_key: pro_monthly
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+  cloudMachineDaySmPrice:
+    type: stripe/price
+    properties:
+      product: ${resources.pro.id}
+      currency: usd
+      unit_amount: 1000
+      recurring:
+        interval: month
+        usage_type: metered
+        meter: ${resources.cloudMachineDaySm.id}
 ```
 
 Create `config.yaml`:
@@ -115,17 +137,65 @@ resources:
       recurring: # default: null, for a one-time price
         interval: month # required inside recurring: day, week, month or year
         interval_count: 1 # default; positive integer
+        usage_type: metered # optional: licensed (default) or metered
+        meter: ${resources.cloudMachineDaySm.id} # required when usage_type is metered
       active: true # default
       metadata: {} # default; string values only
       nickname: "" # default
       lookup_key: pro_monthly # default: ""
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+      event_time_window: null
+      active: true
 ```
 
-Only these properties are supported in this release. Arbitrary nesting is available in the engine, but Stripe metadata values are strings. Product feature arrays and recurring price objects demonstrate typed arrays and nested objects. Currency codes must follow Stripe's rules. API calls use Stripe version `2026-10-28.endive`.
+Products support catalog details, metadata and marketing features. Prices support recurring billing, including Stripe Billing Meter references. Meters support display name, event name, aggregation formula, customer mapping, event time window, value key and active state. Stripe metadata values are strings. Currency codes must follow Stripe's rules. API calls use Stripe version `2026-10-28.endive`.
+
+## Billing Meters
+
+Declare each meter before its metered price. References establish dependency order, so meters are created before prices and prices are archived before their meter is deactivated.
+
+```yaml
+resources:
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+  cloudMachineDaySmPrice:
+    type: stripe/price
+    properties:
+      product: ${resources.cloudProduct.id}
+      currency: usd
+      unit_amount: 1000
+      recurring:
+        interval: month
+        usage_type: metered
+        meter: ${resources.cloudMachineDaySm.id}
+```
+
+Changing a meter's event name, aggregation, customer mapping, or value settings requires a new meter definition. Stripe only allows the display name to be updated. Destroying a managed meter deactivates it; Stripe retains it and its billing history.
 
 ## Price changes
 
-Changing `product`, `currency`, `unit_amount`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
+Changing `product`, `currency`, `unit_amount`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. A metered price's meter reference is part of `recurring` and is replaced with the price. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
 
 **Existing subscriptions retain their original prices.** This package manages the product catalog; it does not migrate customer subscriptions or modify invoices. Applications using a lookup key will discover the new price for future purchases.
 

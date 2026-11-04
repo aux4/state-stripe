@@ -133,7 +133,7 @@ resources:
     properties:
       product: ${resources.pro.id} # required
       currency: usd # required
-      unit_amount: 2000 # required; nonnegative integer in currency minor units
+      unit_amount: 2000 # integer currency minor units; use unit_amount_decimal for fractional minor units
       recurring: # default: null, for a one-time price
         interval: month # required inside recurring: day, week, month or year
         interval_count: 1 # default; positive integer
@@ -195,7 +195,16 @@ Changing a meter's event name, aggregation, customer mapping, or value settings 
 
 ## Price changes
 
-Changing `product`, `currency`, `unit_amount`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. A metered price's meter reference is part of `recurring` and is replaced with the price. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
+Changing `product`, `currency`, `unit_amount`, `unit_amount_decimal`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. A metered price's meter reference is part of `recurring` and is replaced with the price. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
+
+Set exactly one amount field. Use `unit_amount` for an integer number of currency minor units. Use `unit_amount_decimal` as a decimal string when the per-unit charge has fractional minor units; Stripe accepts up to 12 decimal places. For example:
+
+```yaml
+unit_amount: null
+unit_amount_decimal: "16.666666666667"
+```
+
+This represents about 16.67 cents per unit. The selected amount is immutable and changing it replaces the price.
 
 **Existing subscriptions retain their original prices.** This package manages the product catalog; it does not migrate customer subscriptions or modify invoices. Applications using a lookup key will discover the new price for future purchases.
 

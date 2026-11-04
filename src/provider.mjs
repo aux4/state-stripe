@@ -15,7 +15,8 @@ const properties = {
   price: {
     product: { type: 'string', minLength: 1 },
     currency: { type: 'string', minLength: 3 },
-    unit_amount: { type: 'integer', minimum: 0 },
+    unit_amount: { type: ['integer', 'null'], minimum: 0 },
+    unit_amount_decimal: { type: 'string' },
     recurring: { type: ['object', 'null'], default: null, required: ['interval'], additionalProperties: false, properties: {
       interval: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
       interval_count: { type: 'integer', minimum: 1, default: 1 },
@@ -48,7 +49,7 @@ export const signature = {
   version: 1,
   resources: {
     product: { schema: { type: 'object', required: ['name'], additionalProperties: false, properties: properties.product }, immutable: [] },
-    price: { schema: { type: 'object', required: ['product', 'currency', 'unit_amount'], additionalProperties: false, properties: properties.price }, immutable: ['product', 'currency', 'unit_amount', 'recurring'] },
+    price: { schema: { type: 'object', required: ['product', 'currency', 'unit_amount'], additionalProperties: false, properties: properties.price }, immutable: ['product', 'currency', 'unit_amount', 'unit_amount_decimal', 'recurring'] },
     meter: { schema: { type: 'object', required: ['display_name', 'event_name', 'default_aggregation', 'customer_mapping', 'value_settings'], additionalProperties: false, properties: properties.meter }, immutable: ['event_name', 'default_aggregation', 'customer_mapping', 'event_time_window', 'value_settings'] },
   },
 };
@@ -58,6 +59,7 @@ function canonical(type, remote) {
   for (const [key, spec] of Object.entries(properties[type])) {
     let value = remote[key];
     if (type === 'price' && key === 'product' && value && typeof value === 'object') value = value.id;
+    if (type === 'price' && key === 'unit_amount_decimal' && remote.unit_amount !== null) continue;
     if (type === 'price' && key === 'recurring' && value) {
       value = { interval: value.interval, interval_count: value.interval_count ?? 1 };
       if (remote.recurring.usage_type === 'metered' || remote.recurring.meter) {
@@ -119,6 +121,11 @@ export async function handle(request, { apiRequest = callStripe } = {}) {
   assert(request.properties && typeof request.properties === 'object' && !Array.isArray(request.properties), 'properties must be an object');
   for (const key of Object.keys(request.properties)) assert(Object.hasOwn(properties[request.type], key), `Unsupported Stripe property: ${key}`);
   const body = structuredClone(request.properties);
+  if (request.type === 'price') {
+    const integerAmount = Number.isInteger(body.unit_amount) && body.unit_amount >= 0;
+    const decimalAmount = typeof body.unit_amount_decimal === 'string' && /^\d+(?:\.\d{1,12})?$/.test(body.unit_amount_decimal);
+    assert(integerAmount !== decimalAmount, 'Prices require exactly one of unit_amount (nonnegative integer) or unit_amount_decimal (nonnegative decimal string with at most 12 decimal places)');
+  }
   if (request.type === 'price' && body.recurring) {
     body.recurring.usage_type ??= 'licensed';
     if (body.recurring.usage_type === 'metered') {

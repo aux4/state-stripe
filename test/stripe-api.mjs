@@ -23,8 +23,9 @@ globalThis.fetch = async (url, options) => {
   try { store = JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (e) { if (e.code !== 'ENOENT') throw e; store = { next: 0, accounts: {}, subscriptions: ['existing_subscription'] }; }
   const resources = store.accounts[account] ??= {};
-  const [collection, remoteId] = endpoint.split('/');
-  if (!['products', 'prices'].includes(collection)) throw new Error(`Unsupported simulated endpoint ${endpoint}`);
+  const segments = endpoint.split('/');
+  const [collection, remoteId, transition] = segments[0] === 'billing' ? ['meters', segments[2], segments[3]] : segments;
+  if (!['products', 'prices', 'meters'].includes(collection)) throw new Error(`Unsupported simulated endpoint ${endpoint}`);
   const missing = () => response({ error: { code: 'resource_missing' } }, 404);
   if (options.method === 'GET') return resources[remoteId] ? response(resources[remoteId]) : missing();
   const key = options.headers['Idempotency-Key'];
@@ -37,7 +38,7 @@ globalThis.fetch = async (url, options) => {
   }
   if (remoteId && !resources[remoteId]) return missing();
   const body = decode(options.body);
-  const id = remoteId ?? `${collection === 'products' ? 'prod' : 'price'}_${++store.next}`;
+  const id = remoteId ?? `${collection === 'products' ? 'prod' : collection === 'meters' ? 'mtr_test' : 'price'}_${++store.next}`;
   const remote = resources[id] ?? { id, active: true, metadata: {}, ...(collection === 'products' ? { images: [], marketing_features: [], description: '' } : { nickname: '', lookup_key: '', recurring: null }) };
   if (body.lookup_key && body.transfer_lookup_key) for (const r of Object.values(resources)) if (r.lookup_key === body.lookup_key) r.lookup_key = '';
   delete body.transfer_lookup_key;
@@ -49,6 +50,12 @@ globalThis.fetch = async (url, options) => {
   }
   for (const field of ['images', 'marketing_features']) if (body[field] === '') body[field] = [];
   resources[id] = { ...remote, ...body };
+  if (collection === 'meters') resources[id].status = transition === 'deactivate' ? 'inactive' : 'active';
+  if (collection === 'prices') {
+    const r = resources[id];
+    if (r.unit_amount_decimal !== undefined) r.unit_amount = Number.isInteger(Number(r.unit_amount_decimal)) ? Number(r.unit_amount_decimal) : null;
+    else r.unit_amount_decimal = String(r.unit_amount);
+  }
   operations[key] = { fingerprint, result: resources[id] };
   await fs.writeFile(file, JSON.stringify(store));
   return response(resources[id]);

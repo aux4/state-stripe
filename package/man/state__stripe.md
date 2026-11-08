@@ -1,6 +1,6 @@
 #### Description
 
-Stripe adapter for aux4/state. Defines product and fixed-amount price resources, including recurring billing. Amount, currency, product and recurrence changes require replacement. Destruction archives resources, preserving existing subscriptions. API communication is performed by community/stripe.
+Stripe adapter for aux4/state. Defines product, fixed and metered price, and Billing Meter resources. Price amount, currency, product and recurrence changes require replacement. Meter event semantics are immutable; only the display name can be updated. Destroying a price archives it and destroying a meter deactivates it, preserving billing history. API communication is performed by community/stripe.
 
 #### Usage
 

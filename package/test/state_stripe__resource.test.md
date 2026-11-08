@@ -18,6 +18,7 @@ aux4 state stripe resource < request.json | jq '.resources.price.immutable'
   "product",
   "currency",
   "unit_amount",
+  "unit_amount_decimal",
   "recurring"
 ]
 ```

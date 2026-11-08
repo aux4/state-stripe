@@ -1,6 +1,6 @@
 # aux4/state-stripe
 
-Resource schemas, defaults, change detection rules and lifecycle operations for Stripe products and prices. All API communication is delegated to community/stripe.
+Resource schemas, defaults, change detection rules and lifecycle operations for Stripe products, fixed and metered prices, and Billing Meters. All API communication is delegated to community/stripe.
 
 ## Installation
 
@@ -44,6 +44,28 @@ resources:
       recurring:
         interval: month
       lookup_key: pro_monthly
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+  cloudMachineDaySmPrice:
+    type: stripe/price
+    properties:
+      product: ${resources.pro.id}
+      currency: usd
+      unit_amount: 1000
+      recurring:
+        interval: month
+        usage_type: metered
+        meter: ${resources.cloudMachineDaySm.id}
 ```
 
 Create `config.yaml`:
@@ -111,21 +133,78 @@ resources:
     properties:
       product: ${resources.pro.id} # required
       currency: usd # required
-      unit_amount: 2000 # required; nonnegative integer in currency minor units
+      unit_amount: 2000 # integer currency minor units; use unit_amount_decimal for fractional minor units
       recurring: # default: null, for a one-time price
         interval: month # required inside recurring: day, week, month or year
         interval_count: 1 # default; positive integer
+        usage_type: metered # optional: licensed (default) or metered
+        meter: ${resources.cloudMachineDaySm.id} # required when usage_type is metered
       active: true # default
       metadata: {} # default; string values only
       nickname: "" # default
       lookup_key: pro_monthly # default: ""
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+      event_time_window: null
+      active: true
 ```
 
-Only these properties are supported in this release. Arbitrary nesting is available in the engine, but Stripe metadata values are strings. Product feature arrays and recurring price objects demonstrate typed arrays and nested objects. Currency codes must follow Stripe's rules. API calls use Stripe version `2026-10-28.endive`.
+Products support catalog details, metadata and marketing features. Prices support recurring billing, including Stripe Billing Meter references. Meters support display name, event name, aggregation formula, customer mapping, event time window, value key and active state. Stripe metadata values are strings. Currency codes must follow Stripe's rules. API calls use Stripe version `2026-10-28.endive`.
+
+## Billing Meters
+
+Declare each meter before its metered price. References establish dependency order, so meters are created before prices and prices are archived before their meter is deactivated.
+
+```yaml
+resources:
+  cloudMachineDaySm:
+    type: stripe/meter
+    properties:
+      display_name: Cloud machine days (small)
+      event_name: aux4_cloud_machine_day_sm
+      default_aggregation:
+        formula: sum
+      customer_mapping:
+        type: by_id
+        event_payload_key: stripe_customer_id
+      value_settings:
+        event_payload_key: value
+  cloudMachineDaySmPrice:
+    type: stripe/price
+    properties:
+      product: ${resources.cloudProduct.id}
+      currency: usd
+      unit_amount: 1000
+      recurring:
+        interval: month
+        usage_type: metered
+        meter: ${resources.cloudMachineDaySm.id}
+```
+
+Changing a meter's event name, aggregation, customer mapping, or value settings requires a new meter definition. Stripe only allows the display name to be updated. Destroying a managed meter deactivates it; Stripe retains it and its billing history.
 
 ## Price changes
 
-Changing `product`, `currency`, `unit_amount`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
+Changing `product`, `currency`, `unit_amount`, `unit_amount_decimal`, or `recurring` creates a replacement price and archives the previous price after dependents have been updated. A metered price's meter reference is part of `recurring` and is replaced with the price. Other supported fields update in place. When a managed replacement keeps the old price's lookup key, the key is transferred to the new price. New resources do not automatically take lookup keys from unrelated prices.
+
+Set exactly one amount field. Use `unit_amount` for an integer number of currency minor units. Use `unit_amount_decimal` as a decimal string when the per-unit charge has fractional minor units; Stripe accepts up to 12 decimal places. For example:
+
+```yaml
+unit_amount: null
+unit_amount_decimal: "16.666666666667"
+```
+
+This represents about 16.67 cents per unit. The selected amount is immutable and changing it replaces the price.
 
 **Existing subscriptions retain their original prices.** This package manages the product catalog; it does not migrate customer subscriptions or modify invoices. Applications using a lookup key will discover the new price for future purchases.
 
@@ -158,3 +237,5 @@ The engine invokes `aux4 state stripe resource` with a versioned JSON lifecycle 
 ## Environment Variables
 
 The environment variable named by `providers.stripe.config.apiKeyEnv` supplies the Stripe key. No API keys are read from definition properties or saved to state. See the [aux4/state documentation](https://hub.aux4.io/r/public/packages/aux4/state) for state backup, locking, `preventDestroy` and interrupted-operation recovery.
+
+Fractional-cent prices use `unit_amount: null` and a canonical `unit_amount_decimal` string, such as `"0.125"`. Use integer `unit_amount` for whole cents. Decimal strings must have a fractional part, at most 12 decimal places, no leading zeros except `0`, and no trailing fractional zeros. Values such as `"1000"`, `"1.0"`, `"01.5"`, or `"1.50"` are rejected before sending a price mutation to Stripe. This keeps subsequent plans stable when Stripe returns normalized amounts.

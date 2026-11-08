@@ -26,6 +26,8 @@ test('real engine and Stripe provider manage independent catalogs, replace price
     resources: {
       pro: { type: 'stripe/product', properties: { name: 'Pro', metadata: { team: 'billing' }, marketing_features: [{ name: 'Unlimited projects' }] } },
       monthly: { type: 'stripe/price', properties: { product: '${resources.pro.id}', currency: 'usd', unit_amount: 2000, recurring: { interval: 'month' }, lookup_key: 'pro_monthly' } },
+      meter: { type: 'stripe/meter', properties: { display_name: 'Runs', event_name: 'runs', default_aggregation: { formula: 'sum' }, customer_mapping: { type: 'by_id', event_payload_key: 'customer' }, value_settings: { event_payload_key: 'value' } } },
+      usage: { type: 'stripe/price', properties: { product: '${resources.pro.id}', currency: 'usd', unit_amount: null, unit_amount_decimal: '0.125', recurring: { interval: 'month', usage_type: 'metered', meter: '${resources.meter.id}' } } },
       yearly: { type: 'stripe/price', properties: { product: '${resources.pro.id}', currency: 'usd', unit_amount: 20000, recurring: { interval: 'year' }, lookup_key: 'pro_yearly' } },
     },
   };
@@ -37,11 +39,11 @@ test('real engine and Stripe provider manage independent catalogs, replace price
     return JSON.parse(result.stdout);
   };
   await write();
-  assert.equal(run('validate', 'dev').resources, 3);
+  assert.equal(run('validate', 'dev').resources, 5);
   run('apply', 'dev'); run('apply', 'prod');
   const dev = run('inspect', 'dev'), prod = run('inspect', 'prod');
   assert.notEqual(dev.resources.pro.id, prod.resources.pro.id);
-  assert.equal(run('plan', 'dev').counts.noop, 3);
+  assert.equal(run('plan', 'dev').counts.noop, 5);
   definition.resources.monthly.properties.unit_amount = 2500;
   await write();
   assert.equal(run('plan', 'dev').counts.replace, 1);
@@ -49,7 +51,7 @@ test('real engine and Stripe provider manage independent catalogs, replace price
   const newDev = run('inspect', 'dev');
   assert.notEqual(newDev.resources.monthly.id, dev.resources.monthly.id);
   assert.equal(newDev.resources.yearly.id, dev.resources.yearly.id);
-  assert.equal(run('plan', 'dev').counts.noop, 3);
+  assert.equal(run('plan', 'dev').counts.noop, 5);
   let remote = JSON.parse(await fs.readFile(simulator, 'utf8'));
   assert.equal(remote.accounts.dev[dev.resources.monthly.id].active, false);
   assert.equal(remote.accounts.dev[newDev.resources.monthly.id].lookup_key, 'pro_monthly');
@@ -62,10 +64,10 @@ test('real engine and Stripe provider manage independent catalogs, replace price
   remote = JSON.parse(await fs.readFile(simulator, 'utf8'));
   assert.deepEqual(remote.accounts.dev[dev.resources.pro.id].metadata, {});
   assert.equal(remote.accounts.dev[dev.resources.pro.id].marketing_features.length, 2);
-  assert.equal(run('plan', 'dev').counts.noop, 3);
+  assert.equal(run('plan', 'dev').counts.noop, 5);
   assert.match(run('plan', 'dev', 'CATALOG_OTHER_KEY', true), /identity differs/);
   run('destroy', 'dev');
   remote = JSON.parse(await fs.readFile(simulator, 'utf8'));
-  assert(Object.values(remote.accounts.dev).every(r => r.active === false));
+  assert(Object.values(remote.accounts.dev).every(r => r.status ? r.status === 'inactive' : r.active === false));
   assert(Object.values(remote.accounts.prod).every(r => r.active === true));
 });

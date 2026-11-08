@@ -237,3 +237,5 @@ The engine invokes `aux4 state stripe resource` with a versioned JSON lifecycle 
 ## Environment Variables
 
 The environment variable named by `providers.stripe.config.apiKeyEnv` supplies the Stripe key. No API keys are read from definition properties or saved to state. See the [aux4/state documentation](https://hub.aux4.io/r/public/packages/aux4/state) for state backup, locking, `preventDestroy` and interrupted-operation recovery.
+
+Fractional-cent prices use `unit_amount: null` and a canonical `unit_amount_decimal` string, such as `"0.125"`. Use integer `unit_amount` for whole cents. Decimal strings must have a fractional part, at most 12 decimal places, no leading zeros except `0`, and no trailing fractional zeros. Values such as `"1000"`, `"1.0"`, `"01.5"`, or `"1.50"` are rejected before sending a price mutation to Stripe. This keeps subsequent plans stable when Stripe returns normalized amounts.

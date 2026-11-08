@@ -9,7 +9,7 @@ function mock(responses) {
     calls.push(request);
     const next = responses.shift();
     assert(next, 'Unexpected API call');
-    return { status: next.status ?? 200, body: next.body ?? next };
+    return { status: Number.isInteger(next.status) ? next.status : 200, body: next.body ?? next };
   } };
 }
 test('schema validation stays offline and defines immutable price fields', async () => {
@@ -65,4 +65,52 @@ test('destroy archives and absent resources are already removed', async () => {
   assert.deepEqual(m.calls[0].data, { active: false });
   assert.equal((await handle(req('delete', { id: 'prod_missing' }), mock([{ status: 404, body: { error: { code: 'resource_missing' } } }]))).archived, true);
   await assert.rejects(handle(req('read', { id: '../customers' }), mock([])), /Invalid Stripe resource ID/);
+});
+const meterProperties = { display_name: 'Runs', event_name: 'runs', default_aggregation: { formula: 'sum' }, customer_mapping: { type: 'by_id', event_payload_key: 'customer' }, value_settings: { event_payload_key: 'value' }, event_time_window: null, active: true };
+test('meter lifecycle preserves identity, immutable settings and separate idempotency keys', async () => {
+  const active = { id: 'mtr_test_123', ...meterProperties, status: 'active' };
+  const created = mock([active]);
+  const result = await handle(req('create', { type: 'meter', properties: meterProperties }), created);
+  assert.equal(created.calls[0].path, '/v1/billing/meters');
+  assert.equal(created.calls[0].data.active, undefined);
+  assert.deepEqual(result.properties, meterProperties);
+  const read = await handle(req('read', { type: 'meter', id: active.id }), mock([active]));
+  assert.deepEqual(read.properties, meterProperties);
+  const inactive = { ...active, status: 'inactive', display_name: 'Command runs' };
+  const update = mock([active, inactive, inactive]);
+  const updated = await handle(req('update', { type: 'meter', id: active.id, previous: meterProperties, properties: { ...meterProperties, display_name: 'Command runs', active: false } }), update);
+  assert.deepEqual(update.calls.map(c => [c.method, c.path]), [['POST', '/v1/billing/meters/mtr_test_123'], ['POST', '/v1/billing/meters/mtr_test_123/deactivate'], ['GET', '/v1/billing/meters/mtr_test_123']]);
+  assert.deepEqual(update.calls[0].data, { display_name: 'Command runs' });
+  assert.notEqual(update.calls[0].idempotencyKey, update.calls[1].idempotencyKey);
+  assert.equal(updated.properties.active, false);
+  const reactivate = mock([active, active]);
+  await handle(req('update', { type: 'meter', id: active.id, previous: { ...meterProperties, active: false }, properties: { active: true } }), reactivate);
+  assert.equal(reactivate.calls[0].path, '/v1/billing/meters/mtr_test_123/reactivate');
+  const deletion = mock([active, inactive]);
+  assert.equal((await handle(req('delete', { type: 'meter', id: active.id }), deletion)).archived, true);
+  assert.equal(deletion.calls[1].path, '/v1/billing/meters/mtr_test_123/deactivate');
+  const alreadyInactive = mock([inactive]);
+  await handle(req('delete', { type: 'meter', id: active.id }), alreadyInactive);
+  assert.equal(alreadyInactive.calls.length, 1);
+  const createInactive = mock([active, inactive, inactive]);
+  assert.equal((await handle(req('create', { type: 'meter', properties: { ...meterProperties, active: false } }), createInactive)).properties.active, false);
+  assert.equal(createInactive.calls[1].path, '/v1/billing/meters/mtr_test_123/deactivate');
+});
+test('metered fractional prices roundtrip and reject noncanonical or ambiguous amounts before network', async () => {
+  const properties = { product: 'prod_existing', currency: 'usd', unit_amount: null, unit_amount_decimal: '0.125', recurring: { interval: 'month', interval_count: 1, usage_type: 'metered', meter: 'mtr_test_123' }, active: true, metadata: {}, nickname: '', lookup_key: '' };
+  const remote = { id: 'price_fractional', ...properties };
+  const m = mock([remote, remote]);
+  const created = await handle(req('create', { type: 'price', properties }), m);
+  const read = await handle(req('read', { type: 'price', id: remote.id }), m);
+  assert.deepEqual(created.properties, properties);
+  assert.deepEqual(read.properties, properties);
+  assert.equal(m.calls[0].data.unit_amount, undefined);
+  assert.deepEqual(m.calls[0].data.recurring, properties.recurring);
+  for (const decimal of ['1000', '1.0', '01.5', '1.50', '-0.5', '0.1234567890123']) {
+    const bad = mock([]);
+    await assert.rejects(handle(req('create', { type: 'price', properties: { ...properties, unit_amount_decimal: decimal } }), bad), /canonical fractional/);
+    assert.equal(bad.calls.length, 0);
+  }
+  await assert.rejects(handle(req('create', { type: 'price', properties: { ...properties, unit_amount: 1 } }), mock([])), /exactly one/);
+  await assert.rejects(handle(req('create', { type: 'price', properties: { ...properties, recurring: { interval: 'month', usage_type: 'metered' } } }), mock([])), /valid recurring.meter/);
 });

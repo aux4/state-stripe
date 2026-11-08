@@ -1,5 +1,6 @@
 import { callStripe } from './stripe.mjs';
 
+const fractionalAmountPattern = '^(?:0|[1-9]\\d*)\\.\\d{0,11}[1-9]$';
 const string = { type: 'string' };
 const text = { type: 'string', default: '' };
 const metadata = { type: 'object', additionalProperties: string, default: {} };
@@ -16,7 +17,7 @@ const properties = {
     product: { type: 'string', minLength: 1 },
     currency: { type: 'string', minLength: 3 },
     unit_amount: { type: ['integer', 'null'], minimum: 0 },
-    unit_amount_decimal: { type: 'string' },
+    unit_amount_decimal: { type: 'string', pattern: fractionalAmountPattern },
     recurring: { type: ['object', 'null'], default: null, required: ['interval'], additionalProperties: false, properties: {
       interval: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
       interval_count: { type: 'integer', minimum: 1, default: 1 },
@@ -123,8 +124,8 @@ export async function handle(request, { apiRequest = callStripe } = {}) {
   const body = structuredClone(request.properties);
   if (request.type === 'price') {
     const integerAmount = Number.isInteger(body.unit_amount) && body.unit_amount >= 0;
-    const decimalAmount = typeof body.unit_amount_decimal === 'string' && /^\d+(?:\.\d{1,12})?$/.test(body.unit_amount_decimal);
-    assert(integerAmount !== decimalAmount, 'Prices require exactly one of unit_amount (nonnegative integer) or unit_amount_decimal (nonnegative decimal string with at most 12 decimal places)');
+    const decimalAmount = typeof body.unit_amount_decimal === 'string' && new RegExp(fractionalAmountPattern).test(body.unit_amount_decimal);
+    assert(integerAmount !== decimalAmount, 'Prices require exactly one of unit_amount (nonnegative integer) or unit_amount_decimal (canonical fractional cents, at most 12 places, no leading or trailing zeros; use unit_amount for whole cents)');
   }
   if (request.type === 'price' && body.recurring) {
     body.recurring.usage_type ??= 'licensed';
